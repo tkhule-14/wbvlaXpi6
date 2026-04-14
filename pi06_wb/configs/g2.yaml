@@ -1,0 +1,92 @@
+# Pi0.6-WB configuration for AgiBot G2 architecture validation
+# Robot: AgiBot G2 — dual 7-DOF arms, wheeled base, 2D grippers/head/waist
+
+model:
+  # PaliGemma backbone
+  paligemma_variant: "gemma_2b"
+  action_expert_variant: "gemma_300m"
+  dtype: "bfloat16"
+
+  # G2 action/state dims (decoupled from openpi's single action_dim)
+  state_dim: 25            # 14D arm joints + 2D grippers + 3D base pos + 6D base vel
+  manip_action_dim: 20     # 14D arms + 2D grippers + 2D head + 2D waist
+  loco_action_dim: 3       # [vx, vy, omega_z]
+
+  # Flow matching
+  action_horizon: 50       # reduce to 30 if inference latency > 100ms
+  num_denoising_steps: 10  # reduce to 4 for faster inference
+
+  # Image keys (order must match model's image_keys)
+  image_keys:
+    - "base_0_rgb"         # observation.images.top_head
+    - "left_wrist_0_rgb"   # observation.images.hand_left
+    - "right_wrist_0_rgb"  # observation.images.hand_right
+
+training:
+  # Optimizer
+  learning_rate: 1.0e-4
+  lr_schedule: "cosine"
+  warmup_steps: 2000          # freeze VLM+ActionExpert, train only new layers
+  total_steps: 20000          # for task_3777 subset; 200K for full dataset
+  batch_size: 128             # effective; divide by num_gpus for per-device
+  gradient_clip: 1.0
+
+  # Loss weights
+  lambda_loco: 0.1            # weight for locomotion MSE loss (tune from grad norms)
+                              # monitor: grad_norm(loco_head) vs grad_norm(action_expert)
+
+  # Mixed precision
+  bf16: true
+
+  # Gradient checkpointing (enable for memory savings on long action horizons)
+  gradient_checkpointing: false
+
+  # Freeze strategy for 2K-step warmup
+  # During warmup: only train state_proj + new action_in/out_proj rows + locomotion_head
+  # After warmup: unfreeze everything
+  warmup_freeze_modules:
+    - "paligemma_with_expert"
+    - "action_time_mlp_in"
+    - "action_time_mlp_out"
+
+  # Logging
+  log_every: 50
+  eval_every: 500
+  save_every: 2000
+
+  # Grad norm tracking (for lambda_loco tuning)
+  track_grad_norms:
+    - "action_in_proj"
+    - "action_out_proj"
+    - "action_time_mlp_in"
+    - "action_time_mlp_out"
+    - "locomotion_head"
+    - "state_proj"
+
+data:
+  dataset_root: "data/agibot_world_2026"
+  action_horizon: 50          # must match model.action_horizon
+  max_token_len: 48
+  use_subtask_split: true     # split episodes by Task Frame segments
+  num_workers: 4
+  prefetch_factor: 2
+
+  # Normalization stats path (generate with data/agibot_world.py:compute_norm_stats)
+  norm_stats_path: "data/norm_stats_g2.json"
+
+# Weight loading
+checkpoint:
+  # Path to openpie-0.6 safetensors checkpoint for weight surgery
+  openpie_checkpoint: "checkpoints/openpie-0.6/policy.safetensors"
+  # Output checkpoint directory
+  output_dir: "checkpoints/pi06_wb_g2"
+
+# Ablation variants (run one at a time by overriding variant key)
+# variant: "A1"   # full Pi0.6-WB (default)
+# variant: "A4"   # flat: all 23D in single flow matching head
+# variant: "A3"   # VQ-VAE instead of flow matching
+# variant: "A5"   # separate arm + gripper flow match heads
+# variant: "A6"   # cross-attention loco head
+
+ablation:
+  variant: "A1"

@@ -1,1 +1,27 @@
+# Python venv
 wbvlaXpi6/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Cloned dependency repos (use as local packages, not committed)
+openpi/
+exla-fla/
+
+# Data & checkpoints (top-level only, not pi06_wb/data/)
+/data/
+/checkpoints/
+*.pt
+*.safetensors
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs
+wandb/
+logs/
+*.log
